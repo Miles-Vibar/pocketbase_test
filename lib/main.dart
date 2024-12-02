@@ -163,6 +163,13 @@ class Post extends Equatable {
         'text': post,
       };
 
+  Post copyWith({
+    String? id,
+    String? post,
+  }) {
+    return Post(id: id ?? this.id, post: post ?? this.post);
+  }
+
   @override
   // TODO: implement props
   List<Object?> get props => [
@@ -184,6 +191,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   List<Post> posts = [];
+  List<Post> toDelete = [];
 
   final postController = TextEditingController();
 
@@ -199,6 +207,7 @@ class _HomePageState extends State<HomePage> {
       posts = (await widget.pb.pb.collection('posts').getFullList())
           .map((value) => Post.fromJson(value.data))
           .toList();
+      _sort();
       setState(() {});
     });
   }
@@ -239,6 +248,21 @@ class _HomePageState extends State<HomePage> {
     await widget.pb.pb.collection('posts').create(body: post.toMap());
   }
 
+  Future<void> _deletePosts(List<Post> posts) async {
+    for (Post p in posts) {
+      await widget.pb.pb.collection('posts').delete(p.id!);
+    }
+
+    toDelete.clear();
+  }
+
+  Future<void> _updatePost(Post post) async {
+    await widget.pb.pb.collection('posts').update(
+          post.id!,
+          body: post.toMap(),
+        );
+  }
+
   @override
   Widget build(BuildContext context) {
     // TODO: implement build
@@ -275,6 +299,8 @@ class _HomePageState extends State<HomePage> {
                   sortAscending: _ascending,
                   sortColumnIndex: _index,
                   rowsPerPage: 8,
+                  showCheckboxColumn: true,
+                  showFirstLastButtons: true,
                   header: Row(
                     children: [
                       const Expanded(child: Text('Posts')),
@@ -294,7 +320,7 @@ class _HomePageState extends State<HomePage> {
                                 },
                                 child: const Text('Cancel'),
                               ),
-                              TextButton(
+                              FilledButton(
                                 onPressed: () {
                                   _addPost(postController.text);
                                   Navigator.pop(context);
@@ -307,13 +333,82 @@ class _HomePageState extends State<HomePage> {
                         ),
                         icon: const Icon(
                           Icons.add,
-                        ), label: const Text("Add Post"),
+                        ),
+                        label: const Text("Add Post"),
                       ),
+                      const SizedBox(
+                        width: 16,
+                      ),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Theme.of(context).colorScheme.error,
+                          disabledBackgroundColor: Theme.of(context)
+                              .colorScheme
+                              .error
+                              .withOpacity(0.5),
+                        ),
+                        onPressed: toDelete.isEmpty
+                            ? null
+                            : () => showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Delete Posts'),
+                                    content: IntrinsicHeight(
+                                      child: Column(
+                                        children: [
+                                          const Text(
+                                            'Would you like to delete the selected posts:',
+                                          ),
+                                          const SizedBox(
+                                            height: 8,
+                                          ),
+                                          Container(
+                                            constraints: const BoxConstraints(
+                                              maxHeight: 300,
+                                              maxWidth: 300,
+                                            ),
+                                            height: 300,
+                                            width: double.maxFinite,
+                                            child: ListView(
+                                              children: toDelete
+                                                  .map((p) => Text(
+                                                      '- ${p.id}: ${p.post}'))
+                                                  .toList(),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () {
+                                          Navigator.pop(context);
+                                        },
+                                        child: const Text('Cancel'),
+                                      ),
+                                      FilledButton(
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: Theme.of(context)
+                                              .colorScheme
+                                              .error,
+                                        ),
+                                        onPressed: () {
+                                          _deletePosts(toDelete);
+                                          Navigator.pop(context);
+                                        },
+                                        child: const Text('Delete'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                        label: const Text('Delete Posts'),
+                        icon: const Icon(Icons.delete),
+                      )
                     ],
                   ),
                   columns: [
                     const DataColumn(
-                      label: Text('#'),
+                      label: Text('ID'),
                     ),
                     const DataColumn(
                       label: Text('Text'),
@@ -327,8 +422,47 @@ class _HomePageState extends State<HomePage> {
                         setState(() {});
                       },
                     ),
+                    const DataColumn(label: Text('')),
                   ],
-                  source: Data(posts: posts),
+                  source: Data(
+                    posts: posts,
+                    toBeDeleted: toDelete,
+                    toDelete: (postList) {
+                      toDelete = postList;
+                      setState(() {});
+                    },
+                    onPressed: (Post post) => showDialog(
+                      context: context,
+                      builder: (context) {
+                        postController.text = post.post ?? '';
+                        return AlertDialog(
+                          title: Text('Update ${post.id}'),
+                          content: TextField(
+                            controller: postController,
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                postController.clear();
+                              },
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: () {
+                                _updatePost(post.copyWith(
+                                  post: postController.text,
+                                ));
+                                Navigator.pop(context);
+                                postController.clear();
+                              },
+                              child: const Text('Update'),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -340,14 +474,29 @@ class _HomePageState extends State<HomePage> {
 }
 
 class Data extends DataTableSource {
-  Data({required this.posts});
+  Data({
+    required this.posts,
+    required this.toBeDeleted,
+    required this.toDelete,
+    required this.onPressed,
+  });
 
   final List<Post> posts;
+  final ValueChanged<List<Post>> toDelete;
+  List<Post> toBeDeleted;
+  final Function(Post post) onPressed;
 
   @override
   DataRow? getRow(int index) {
     // TODO: implement getRow
     return DataRow(
+      selected: toBeDeleted.contains(posts[index]),
+      onSelectChanged: (value) {
+        value ?? false
+            ? toBeDeleted.add(posts[index])
+            : toBeDeleted.remove(posts[index]);
+        toDelete(toBeDeleted);
+      },
       cells: [
         DataCell(Text(posts[index].id!)),
         DataCell(Text(posts[index].post!)),
@@ -356,6 +505,12 @@ class Data extends DataTableSource {
             DateFormat(' EEEE, y MMMM d - hh:mm a').format(
               DateTime.parse(posts[index].dateCreated!),
             ),
+          ),
+        ),
+        DataCell(
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            onPressed: () => onPressed(posts[index]),
           ),
         ),
       ],
